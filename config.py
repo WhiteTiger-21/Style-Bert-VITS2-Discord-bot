@@ -18,6 +18,8 @@ MODEL_INFO_JSON_PATH = os.getenv(
     "MODEL_INFO_JSON", str(ROOT_DIR / "model_info.json"))
 USER_INFO_JSON_PATH = os.getenv(
     "USER_INFO_JSON", str(ROOT_DIR / "user_info.json"))
+SERVER_INFO_JSON_PATH = os.getenv(
+    "SERVER_INFO_JSON", str(ROOT_DIR / "server_info.json"))
 DICT_CSV_PATH = Path(
     os.getenv("DICT_CSV", str(ROOT_DIR / "dict_data/default.csv")))
 COMPILED_DICT_PATH = ROOT_DIR / "dict_data/user.dic"
@@ -30,7 +32,7 @@ AUTO_JOIN_VC_NAME = os.getenv("AUTO_JOIN_VOICE_CHANNEL_NAME")
 # --- NLTK ---
 try:
     nltk.data.find('taggers/averaged_perceptron_tagger_eng')
-except nltk.downloader.DownloadError:
+except LookupError:
     print("Downloading NLTK's averaged_perceptron_tagger_eng...")
     nltk.download('averaged_perceptron_tagger_eng')
 

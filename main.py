@@ -76,6 +76,16 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     
     # User leaves a voice channel the bot is in
     if before.channel and not after.channel: # User disconnected from a channel
+
+        if before.channel.members.__len__() == 0:  # If no members left in the channel
+            server_info = config.load_json_file(config.SERVER_INFO_JSON_PATH, {})
+            server_id = str(guild.id)
+            if server_id not in server_info:
+                server_info[server_id] = {}
+            server_info[server_id]["auto_join"] = True # Set auto-join to True
+            server_info[server_id]["talking"] = True # Set talking to True
+            config.save_json_file(config.SERVER_INFO_JSON_PATH, server_info)
+
         if voice_client and voice_client.channel == before.channel:
             # Check if bot is alone in the channel
             # Non-bot members in the channel:
@@ -87,16 +97,18 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                 # They will persist and resume if the bot rejoins a VC.
                 # If you want to clear/stop them, that logic would go here.
 
+    auto_joined = config.load_json_file(config.SERVER_INFO_JSON_PATH, {}).get(str(guild.id), {}).get("auto_join", True) == True
     # Auto-join logic (optional, can be complex to get right)
     # This is a very simple auto-join if a user enters a channel and the bot is not connected.
     # Consider making this configurable or command-driven.
-    if after.channel and not voice_client: # User joined a channel, bot is not in any VC
-        if after.channel.id == designated_channel.id and isinstance(after.channel, discord.VoiceChannel) and any(not m.bot for m in after.channel.members):
-            try:
-                print(f"User {member.display_name} joined {after.channel.name}. Bot auto-joining.")
-                await after.channel.connect()
-            except discord.ClientException as e:
-                print(f"Error auto-joining voice channel: {e}")
+    if auto_joined:
+        if after.channel and not voice_client:  # User joined a channel, bot is not in any VC
+            if after.channel.id == designated_channel.id and isinstance(after.channel, discord.VoiceChannel) and any(not m.bot for m in after.channel.members):
+                try:
+                    print(f"User {member.display_name} joined {after.channel.name}. Bot auto-joining.")
+                    await after.channel.connect()
+                except discord.ClientException as e:
+                    print(f"Error auto-joining voice channel: {e}")
 
     vc = member.guild.voice_client
     if not tts_setup.models:
@@ -118,34 +130,40 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     tts_model_instance = selected_model_data["model"]
     model_lang_pref = selected_model_data.get("language") # e.g. "JP"
 
-    if before.channel is None and after.channel is not None:
-        lang_for_name = await tts_processing.determine_language_for_tts(member_name, model_lang_pref)
-        playback_queues[member.guild.id].put_nowait({
-            "text": member_name, "language": lang_for_name,
-            "voice_client": vc, "model_instance": tts_model_instance
-        })
-        segment = "が入室しました。"
-        lang_for_segment = await tts_processing.determine_language_for_tts(segment, model_lang_pref)
-        playback_queues[member.guild.id].put_nowait({
-            "text": segment, "language": lang_for_segment,
-            "voice_client": vc, "model_instance": tts_model_instance
-        })
-    elif before.channel is not None and after.channel is None:
-        lang_for_name = await tts_processing.determine_language_for_tts(member_name, model_lang_pref)
-        playback_queues[member.guild.id].put_nowait({
-            "text": member_name, "language": lang_for_name,
-            "voice_client": vc, "model_instance": tts_model_instance
-        })
-        segment = "が退室しました。"
-        lang_for_segment = await tts_processing.determine_language_for_tts(segment, model_lang_pref)
-        playback_queues[member.guild.id].put_nowait({
-            "text": segment, "language": lang_for_segment,
-            "voice_client": vc, "model_instance": tts_model_instance
-        })
+    is_talking = config.load_json_file(config.SERVER_INFO_JSON_PATH, {}).get(str(member.guild.id), {}).get("talking", True)
+    if is_talking and vc:
+        if before.channel is None and after.channel is not None:
+            lang_for_name = await tts_processing.determine_language_for_tts(member_name, model_lang_pref)
+            playback_queues[member.guild.id].put_nowait({
+                "text": member_name, "language": lang_for_name,
+                "voice_client": vc, "model_instance": tts_model_instance
+            })
+            segment = "が入室しました。"
+            lang_for_segment = await tts_processing.determine_language_for_tts(segment, model_lang_pref)
+            playback_queues[member.guild.id].put_nowait({
+                "text": segment, "language": lang_for_segment,
+                "voice_client": vc, "model_instance": tts_model_instance
+            })
+        elif before.channel is not None and after.channel is None:
+            lang_for_name = await tts_processing.determine_language_for_tts(member_name, model_lang_pref)
+            playback_queues[member.guild.id].put_nowait({
+                "text": member_name, "language": lang_for_name,
+                "voice_client": vc, "model_instance": tts_model_instance
+            })
+            segment = "が退室しました。"
+            lang_for_segment = await tts_processing.determine_language_for_tts(segment, model_lang_pref)
+            playback_queues[member.guild.id].put_nowait({
+                "text": segment, "language": lang_for_segment,
+                "voice_client": vc, "model_instance": tts_model_instance
+            })
 
 
 @bot.event
 async def on_message(message: discord.Message):
+    """Handles incoming messages for commands and TTS submissions."""
+
+    is_talking = config.load_json_file(config.SERVER_INFO_JSON_PATH, {}).get(str(message.author.guild.id), {}).get("talking", True)
+
     if message.author.bot:
         return
 
@@ -159,7 +177,7 @@ async def on_message(message: discord.Message):
     if content.startswith(bot.command_prefix):
         command_string = content[len(bot.command_prefix):]
         await bot_commands.process_command(message, command_string)
-    elif is_tts_channel: # Only process non-commands for TTS if in the designated channel
+    elif is_tts_channel and is_talking:  # Only process non-commands for TTS if in the designated channel
         await handle_tts_submission(message, content)
 
 
@@ -209,6 +227,7 @@ async def handle_tts_submission(message: discord.Message, text_content: str):
 
     if is_url:
         segments_to_say.append("URL")
+        model_lang_pref = Languages.JP # Default to Japanese for URLs
     else:
         remaining_text = text_content
         

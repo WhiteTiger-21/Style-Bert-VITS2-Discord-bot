@@ -11,6 +11,16 @@ from style_bert_vits2.nlp.japanese.user_dict import update_dict # Direct import 
 
 async def handle_join_command(message: discord.Message):
     """Handles the !join command."""
+
+    server_info = config.load_json_file(config.SERVER_INFO_JSON_PATH, {})
+    server_id = str(message.guild.id)
+    if server_id not in server_info:
+        server_info[server_id] = {}
+    server_info[server_id]["auto_join"] = True
+    config.save_json_file(
+        config.SERVER_INFO_JSON_PATH,
+        server_info
+    )
     if not message.author.voice:
         await message.channel.send("ボイスチャンネルに参加してからコマンドを実行してください。")
         return
@@ -38,6 +48,17 @@ async def handle_join_command(message: discord.Message):
 
 async def handle_leave_command(message: discord.Message):
     """Handles the !leave command."""
+
+    server_info = config.load_json_file(config.SERVER_INFO_JSON_PATH, {})
+    server_id = str(message.guild.id)
+    if server_id not in server_info:
+        server_info[server_id] = {}
+    
+    server_info[server_id]["auto_join"] = False  # Disable auto-join
+    config.save_json_file(
+        config.SERVER_INFO_JSON_PATH,
+        server_info
+    )
     if message.guild.voice_client and message.guild.voice_client.is_connected():
         await message.guild.voice_client.disconnect()
         await message.channel.send("ボイスチャンネルから退出しました。")
@@ -133,6 +154,32 @@ async def handle_set_nickname_command(message: discord.Message, nickname_to_set:
     await _set_user_preference(str(message.author.id), "nickname", nickname_to_set)
     await message.channel.send(f";あなたの名前の読み上げ設定を `{nickname_to_set}` に設定しました。")
 
+
+async def handle_set_talk_command(message: discord.Message, talk_setting_str: str):
+    """Handles !set talking <true|false>."""
+    if not talk_setting_str:
+        await message.channel.send(";`!set talking` コマンドには true または false が必要です。")
+        return
+
+    talk_setting_lower = talk_setting_str.lower()
+    if talk_setting_lower not in ['true', 'false']:
+        await message.channel.send(";`!set talking` コマンドには true または false を指定してください。")
+        return
+
+    guild_id = message.guild.id
+    
+    server_info = config.load_json_file(config.SERVER_INFO_JSON_PATH, {})
+    server_id = str(guild_id)
+    if server_id not in server_info:
+        server_info[server_id] = {}
+    server_info[server_id]["talking"] = talk_setting_lower == 'true'
+    config.save_json_file(
+        config.SERVER_INFO_JSON_PATH,
+        server_info
+    )
+    await message.channel.send(f";発話設定を `{talk_setting_lower}` に設定しました。")
+
+
 async def handle_get_dict_command(message: discord.Message):
     """Handles !get dict."""
     current_dictionary = {}
@@ -201,7 +248,7 @@ async def process_command(message: discord.Message, command_string: str):
     elif command_name == 'set':
         set_parts = args_str.split(maxsplit=2)
         if len(set_parts) < 1:
-            await message.channel.send(";`!set` コマンドにはターゲットを指定してください (dict, voice, call)。")
+            await message.channel.send(";`!set` コマンドにはターゲットを指定してください (dict, voice, call, nickname, talking)。")
             return
         target = set_parts[0].lower()
         key = set_parts[1] if len(set_parts) > 1 else ""
@@ -215,6 +262,8 @@ async def process_command(message: discord.Message, command_string: str):
             await handle_set_call_command(message, key) # key is 'true'/'false'
         elif target == 'nickname':
             await handle_set_nickname_command(message, key) # key is nickname
+        elif target == 'talking':
+            await handle_set_talk_command(message, key) # key is 'true'/'false'
         else:
             await message.channel.send(f";不明な設定ターゲット `{target}` です。")
             
